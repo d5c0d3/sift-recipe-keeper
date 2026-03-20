@@ -268,7 +268,10 @@ class RecipeExtractorService {
         headers['Authorization'] = `Bearer ${modelConfig.apiKey}`;
     }
 
-    const response = await fetch(endpoint, {
+    //const response = await fetch(endpoint, {
+    const url = endpoint.endsWith('/chat/completions') ? endpoint : `${endpoint}/chat/completions`;
+    console.log('Final request URL:', url);
+    const response = await fetch(url, {
       method: 'POST',
       headers: headers,
       body: JSON.stringify(requestBody),
@@ -277,6 +280,11 @@ class RecipeExtractorService {
     if (!response.ok) {
       throw new Error(`The AI service returned an error (HTTP ${response.status}). Please check your endpoint and API key.`);
     }
+
+    //const rawText = await response.text();
+    //console.log(`RAW API response for ${modelConfig.model}:`, rawText);
+    //const data = JSON.parse(rawText);
+    //console.log(`GPT API response for ${modelConfig.model}:`, data);
 
     const data = await response.json();
     if (data.error) {
