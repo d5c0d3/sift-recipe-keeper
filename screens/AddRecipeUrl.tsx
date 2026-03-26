@@ -90,14 +90,51 @@ export default function AddRecipeUrl() {
       recipe.sourceUrl = url.trim();
       await RecipeStore.addRecipe(recipe);
       navigation.goBack();
-    } catch (error) {
+
+    } catch (error: any) {
       console.error('Failed to extract recipe from URL:', error);
+      const msg = error?.message ?? '';
+
+      let title = 'Import Failed';
+      let message = 'Something went wrong. Please try again.';
+
+      if (msg === 'BOT_PROTECTION') {
+        title = 'Website Protected';
+        message = 'This website blocks automatic imports. Try copying the recipe text and adding it manually instead.';
+      } else if (msg === 'RATE_LIMIT') {
+        title = 'Rate Limit Reached';
+        message = 'The AI service is temporarily rate limited. Wait a moment and try again, or switch to a different model in AI Setup.';
+      } else if (msg === 'EMPTY_RESPONSE') {
+        title = 'No Response from AI';
+        message = 'The AI returned an empty response. This can happen with reasoning models that run out of tokens. Try a different model in AI Setup.';
+      } else if (msg === 'NO_RECIPE_FOUND') {
+        title = 'No Recipe Found';
+        message = 'No recipe could be extracted from this page. The page may require a login, be paywalled, or have an unusual layout.';
+      } else if (msg === 'INVALID_API_KEY') {
+        title = 'Invalid API Key';
+        message = 'API request rejected. Check your API key in Settings → AI Setup.';
+      } else if (msg === 'HTML_RESPONSE' || msg === 'NETWORK_ERROR') {
+        title = 'Connection Error';
+        message = 'Could not reach the AI endpoint. Check your endpoint URL and connection in Settings → AI Setup.';
+      } else if (msg === 'JSON_PARSE_ERROR') {
+        title = 'Unexpected Response';
+        message = 'The model returned an unexpected response. Try a different model in Settings → AI Setup.';
+      } else if (msg.startsWith('AI model is not configured')) {
+        title = 'AI Not Configured';
+        message = 'Go to Settings → AI Setup to connect an AI model before importing recipes.';
+      } else if (msg.startsWith('API_ERROR:')) {
+        const status = msg.split(':')[1];
+        title = 'API Error';
+        message = `The AI service returned an error (status ${status}). Check your API key and model name in AI Setup.`;
+      }
+
       setPopupConfig({
-        title: 'Error',
-        message: 'Failed to extract recipe. Please try again.',
+        title,
+        message,
         buttons: [{ text: 'OK', onPress: () => setShowPopup(false) }],
       });
       setShowPopup(true);
+    
     } finally {
       setLoading(false);
     }

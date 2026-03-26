@@ -60,6 +60,15 @@ class RecipeExtractorService {
       const response = await fetch(fetchUrl, { headers });
       const html = await response.text();
       
+      // Detect bot-protection / Cloudflare challenge pages
+      if (
+        (html.includes('Just a moment') && html.includes('Checking your browser')) ||
+        html.includes('Enable JavaScript and cookies to continue') ||
+        html.includes('cf-browser-verification')
+      ) {
+        throw new Error('BOT_PROTECTION');
+      }
+
       // Extract the first image URL
       const imageUrl = this.extractFirstImage(html, url);
       
@@ -225,25 +234,44 @@ class RecipeExtractorService {
         headers['Authorization'] = `Bearer ${modelConfig.apiKey}`;
     }
 
-    //const response = await fetch(endpoint, {
     const url = endpoint.endsWith('/chat/completions') ? endpoint : `${endpoint}/chat/completions`;
     console.log('Final request URL:', url);
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify(requestBody),
-    });
 
-    if (!response.ok) {
-      throw new Error(`API call failed: ${response.status}`);
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(requestBody),
+      });
+    } catch {
+      throw new Error('NETWORK_ERROR');
     }
 
+    if (!response.ok) {
+      if (response.status === 429) {
+        throw new Error('RATE_LIMIT');
+      }
+      if (response.status === 401 || response.status === 403) {
+        throw new Error('INVALID_API_KEY');
+      }
+      throw new Error(`API_ERROR:${response.status}`);
+    }
+
+    let data: any;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error('HTML_RESPONSE');
+    }
+
+
+    //Debug
     //const rawText = await response.text();
     //console.log(`RAW API response for ${modelConfig.model}:`, rawText);
     //const data = JSON.parse(rawText);
     //console.log(`GPT API response for ${modelConfig.model}:`, data);
 
-    const data = await response.json();
     console.log(`GPT API response for ${modelConfig.model}:`, data);
 
     if (data.error) {
@@ -261,9 +289,9 @@ class RecipeExtractorService {
 
     if (!content || content.trim() === '') {
       console.error(`Empty content in API response for ${modelConfig.model}`);
-      throw new Error('Empty content in API response');
+      throw new Error('EMPTY_RESPONSE');
     }
-
+    
     return content;
   }
 
@@ -368,6 +396,7 @@ class RecipeExtractorService {
     try {
       console.log('Raw response to parse:', response);
       
+      //Debug
       //let jsonMatch = response.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/);
       //if (!jsonMatch) {
       //  jsonMatch = response.match(/\{[^{}]*\}/);
@@ -387,15 +416,21 @@ class RecipeExtractorService {
       const jsonString = jsonMatch[0];
       console.log('Extracted JSON string:', jsonString);
       
-      const data = JSON.parse(jsonString);
+      let data: any;
+      try {
+        data = JSON.parse(jsonString);
+      } catch {
+        throw new Error('JSON_PARSE_ERROR');
+      }      
+
       console.log('Parsed GPT response:', data);
       console.log('Tags from response:', data.tags);
       
       if (!data.name) {
         console.error('Missing name in parsed data:', data);
-        throw new Error('Missing name in recipe data');
+        throw new Error('NO_RECIPE_FOUND');
       }
-
+      
       // Read groups (required), fallback to legacy if absent
       let ingredientsGroups: IngredientGroup[] = [];
       let instructionGroups: InstructionGroup[] = [];
