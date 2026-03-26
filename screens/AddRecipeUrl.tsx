@@ -85,7 +85,8 @@ export default function AddRecipeUrl() {
       recipe.sourceUrl = url.trim();
       await RecipeStore.addRecipe(recipe);
       navigation.goBack();
-    } catch (error) {
+
+    } catch (error: any) {
       console.error('Failed to extract recipe from URL:', error);
       const message = error instanceof Error ? error.message : 'Something went wrong. Please try again.';
       setPopupConfig({
@@ -94,6 +95,7 @@ export default function AddRecipeUrl() {
         buttons: [{ text: 'OK', onPress: () => setShowPopup(false) }],
       });
       setShowPopup(true);
+    
     } finally {
       setLoading(false);
     }

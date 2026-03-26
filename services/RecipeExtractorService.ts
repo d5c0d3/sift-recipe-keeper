@@ -268,19 +268,32 @@ class RecipeExtractorService {
         headers['Authorization'] = `Bearer ${modelConfig.apiKey}`;
     }
 
-    //const response = await fetch(endpoint, {
     const url = endpoint.endsWith('/chat/completions') ? endpoint : `${endpoint}/chat/completions`;
     console.log('Final request URL:', url);
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify(requestBody),
-    });
 
     if (!response.ok) {
       throw new Error(`The AI service returned an error (HTTP ${response.status}). Please check your endpoint and API key.`);
     }
 
+    if (!response.ok) {
+      if (response.status === 429) {
+        throw new Error('RATE_LIMIT');
+      }
+      if (response.status === 401 || response.status === 403) {
+        throw new Error('INVALID_API_KEY');
+      }
+      throw new Error(`API_ERROR:${response.status}`);
+    }
+
+    let data: any;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error('HTML_RESPONSE');
+    }
+
+
+    //Debug
     //const rawText = await response.text();
     //console.log(`RAW API response for ${modelConfig.model}:`, rawText);
     //const data = JSON.parse(rawText);
@@ -302,7 +315,7 @@ class RecipeExtractorService {
     if (!content || content.trim() === '') {
       throw new Error('The AI returned an empty response. Please try again.');
     }
-
+    
     return content;
   }
 
@@ -467,7 +480,7 @@ class RecipeExtractorService {
         console.error('Recipe name missing in parsed data:', data);
         throw new Error('No recipe was found on this page. Try a different URL.');
       }
-
+      
       // Read groups (required), fallback to legacy if absent
       let ingredientsGroups: IngredientGroup[] = [];
       let instructionGroups: InstructionGroup[] = [];
