@@ -163,10 +163,10 @@ export default function RecipeList({ navigation }: { navigation: any }) {
               right: 20 
             }]}>
               <TouchableOpacity style={styles.menuItem} onPress={handleAddWithUrl}>
-                <Text style={styles.menuText}>Add recipe from website</Text>
+                <Text style={styles.menuText}>Add from website or file</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.menuItem} onPress={handleAddManually}>
-                <Text style={styles.menuText}>Add recipe manually</Text>
+                <Text style={styles.menuText}>Add manually</Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
