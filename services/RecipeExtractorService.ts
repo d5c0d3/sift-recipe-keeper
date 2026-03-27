@@ -44,41 +44,17 @@ class RecipeExtractorService {
     }
   }
 
-
-  async extractRecipe(url: string, extraInstructions?: string): Promise<Recipe> {
+  // New private method — owns the AI prompt + parse, takes clean text + optional image
+  private async extractRecipeFromContent(
+    cleanContent: string,
+    localImageUri: string | null,
+    sourceUrl?: string,
+    extraInstructions?: string
+  ): Promise<Recipe> {
     await this.loadCustomModelConfig();
     try {
-      // Add cors proxy to the URL if on web platform
-      const fetchUrl = Platform.OS === 'web' ? this.corsProxy + url : url;
-      console.log('Fetching URL:', fetchUrl);
-      
-      // Fetch webpage content with appropriate headers
-      const headers: HeadersInit = Platform.OS === 'web' 
-        ? { 'Origin': (window?.location?.origin || 'https://localhost') }
-        : { 'User-Agent': 'Mozilla/5.0' }; // Add a user agent for mobile requests
-      
-      const response = await fetch(fetchUrl, { headers });
-      const html = await response.text();
-      
-      // Detect bot-protection / Cloudflare challenge pages
-      if (
-        (html.includes('Just a moment') && html.includes('Checking your browser')) ||
-        html.includes('Enable JavaScript and cookies to continue') ||
-        html.includes('cf-browser-verification')
-      ) {
-        throw new Error('BOT_PROTECTION');
-      }
-
-      // Extract the first image URL
-      const imageUrl = this.extractFirstImage(html, url);
-      
-      // Download and save the image if found
-      const localImageUri = imageUrl ? await this.downloadAndSaveImage(imageUrl) : null;
-      
-      // Clean and prepare content
-      const cleanContent = this.cleanWebPageContent(html);
-      
-      // Prepare GPT prompt for groups schema (v2)
+        // Prepare GPT prompt for groups schema (v2)
+        // TODO: Add extra instructions option to model setup.
       const prompt = `
         Extract recipe information from the following content.
         Your primary rule is to ONLY extract information that is explicitly present in the text.
@@ -116,6 +92,8 @@ class RecipeExtractorService {
         - Cooking Time: Extract from content. If missing, use an empty string "".
         - Grouping: If the recipe has distinct sections with titles (like "Sauce" or "Dough"), create corresponding groups. If there are no such sections, create just one group for ingredients and one for instructions, leaving the 'title' as an empty string. DO NOT make up your own group titles. DO NOT use generic titles like "Ingredients" or "Instructions."
 
+        ${extraInstructions ? `- ${extraInstructions}` : ''}
+
         Content:
         ${cleanContent}
       `;
@@ -124,11 +102,72 @@ class RecipeExtractorService {
       const gptResponse = await this.callGPTAPI(prompt);
       
       // Parse and create recipe with local image
-      return this.parseGPTResponse(gptResponse, localImageUri, url);
+      return this.parseGPTResponse(gptResponse, localImageUri, sourceUrl);
     } catch (error) {
       console.log('Error extracting recipe:', error);
       throw error;
     }
+  }
+
+
+
+  async extractRecipe(url: string, extraInstructions?: string): Promise<Recipe> {
+    try {
+      // Add cors proxy to the URL if on web platform
+      const fetchUrl = Platform.OS === 'web' ? this.corsProxy + url : url;
+      console.log('Fetching URL:', fetchUrl);
+      
+      // Fetch webpage content with appropriate headers
+      const headers: HeadersInit = Platform.OS === 'web' 
+        ? { 'Origin': (window?.location?.origin || 'https://localhost') }
+        : { 'User-Agent': 'Mozilla/5.0' }; // Add a user agent for mobile requests
+      
+      const response = await fetch(fetchUrl, { headers });
+      const html = await response.text();
+      
+      // Detect bot-protection / Cloudflare challenge pages
+      if (
+        (html.includes('Just a moment') && html.includes('Checking your browser')) ||
+        html.includes('Enable JavaScript and cookies to continue') ||
+        html.includes('cf-browser-verification')
+      ) {
+        throw new Error('BOT_PROTECTION');
+      }
+
+      // Extract the first image URL
+      const imageUrl = this.extractFirstImage(html, url);
+      
+      // Download and save the image if found
+      const localImageUri = imageUrl ? await this.downloadAndSaveImage(imageUrl) : null;
+      
+      // Clean and prepare content
+      const cleanContent = this.cleanWebPageContent(html);
+
+      return this.extractRecipeFromContent(cleanContent, localImageUri, url, extraInstructions);
+
+    } catch (error) {
+      console.log('Error fetching content from URL: ', error);
+      throw error;
+    }  
+  }
+
+  async extractRecipeFromFile(
+    filePath: string,
+    fileName: string,
+    extraInstructions?: string
+  ): Promise<Recipe> {
+    try {
+      // no loadCustomModelConfig() here
+      const isHtml = /\.html?$/i.test(fileName);
+      const raw = await RNFS.readFile(filePath, 'utf8');
+      const imageUrl = isHtml ? this.extractFirstImage(raw, 'file://') : null;
+      const localImageUri = imageUrl ? await this.downloadAndSaveImage(imageUrl) : null;
+      const cleanContent = isHtml ? this.cleanWebPageContent(raw) : raw.slice(0, 20000);
+      return this.extractRecipeFromContent(cleanContent, localImageUri, undefined, extraInstructions);
+    } catch (error) {
+      console.log('Error loading file: ', error);
+      throw error;
+    }   
   }
 
   private cleanWebPageContent(html: string): string {
