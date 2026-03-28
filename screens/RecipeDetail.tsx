@@ -11,10 +11,19 @@ import {
   Modal,
   Pressable,
   Linking,
-  Clipboard,
+  // 'Clipboard' is deprecated.ts(6385)
+  // Clipboard has been extracted from react-native core and
+  // will be removed in a future release. 
+  // It can now be installed and imported from 
+  // @react-native-clipboard/clipboard instead of 'react-native'.
+  //Clipboard, 
   ToastAndroid,
   useWindowDimensions,
+  Share,
 } from 'react-native';
+// see above 
+import Clipboard from '@react-native-clipboard/clipboard';
+
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import RecipeStore from '../store/RecipeStore';
@@ -23,6 +32,9 @@ import { useTheme } from '../hooks/useTheme';
 import Header from '../components/Header';
 import CustomPopup from '../components/CustomPopup';
 import ContentWrapper from '../components/ContentWrapper';
+import RNFS from 'react-native-fs';
+import RNShare from 'react-native-share';
+import { buildRecipeZip } from '../services/recipeExportUtils';
 
 export default function RecipeDetail() {
   const navigation = useNavigation<any>();
@@ -38,6 +50,40 @@ export default function RecipeDetail() {
     return foundRecipe;
   });
   const [isMenuVisible, setIsMenuVisible] = useState(false);
+
+  const [isShareMenuVisible, setIsShareMenuVisible] = useState(false);
+
+  const handleShareUrl = () => {
+    setIsShareMenuVisible(false);
+    Share.share({
+      url: recipe.sourceUrl!,   // iOS
+      message: recipe.sourceUrl!, // Android fallback
+    });
+  };
+
+  const handleShareRecipeText = () => {
+    setIsShareMenuVisible(false);
+    Share.share({ message: formatRecipeForSharing(recipe!) });
+  };
+
+  const handleShareIngredientsText = () => {
+    setIsShareMenuVisible(false);
+    Share.share({ message: formatIngredientsForSharing(recipe!) });
+  };
+
+  const handleShareExport = async () => {
+    setIsShareMenuVisible(false);
+    try {
+      const zipPath = await buildRecipeZip([recipe!]);
+      await RNShare.open({
+        url: `file://${zipPath}`,
+        type: 'application/zip',
+      });
+      RNFS.unlink(zipPath).catch(() => {});
+    } catch (err) {
+      console.error('Failed to share recipe file:', err);
+    }
+  };
 
   const { colors } = useTheme();
   const { width: windowWidth } = useWindowDimensions();
@@ -113,6 +159,48 @@ export default function RecipeDetail() {
       return next;
     });
   };
+
+  const formatIngredientsForSharing = (recipe: Recipe): string => {
+    const lines: string[] = [recipe.name, ''];
+
+    (recipe.ingredientsGroups || []).forEach(group => {
+      if (group.title) lines.push(group.title.toUpperCase());
+      group.items.forEach(ing => lines.push(`• ${ing.name}`));
+      lines.push('');
+    });
+    return lines.join('\n').trim();
+  };
+
+  const formatRecipeForSharing = (recipe: Recipe): string => {
+    const lines: string[] = [recipe.name, ''];
+
+    (recipe.ingredientsGroups || []).forEach(group => {
+      if (group.title) lines.push(group.title.toUpperCase());
+      group.items.forEach(ing => lines.push(`• ${ing.name}`));
+      lines.push('');
+    });
+
+    (recipe.instructionGroups || []).forEach(group => {
+      if (group.title) lines.push(group.title.toUpperCase());
+      group.items.forEach((step, i) => {
+        lines.push(`${i + 1}. ${step}`);
+        lines.push('');
+      });
+    });
+
+    if (recipe.sourceUrl) lines.push(`Source: ${recipe.sourceUrl}`);
+    return lines.join('\n').trim();
+  };
+
+  const ShareButton = () => (
+    <Pressable
+      onPress={() => setIsShareMenuVisible(true)}
+      style={({ pressed }) => ({ padding: 8, opacity: pressed ? 0.7 : 1 })}
+      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+    >
+      <Ionicons name="share-social-outline" size={24} color={colors.tint} />
+    </Pressable>
+  );
 
   const MenuButton = () => (
     <Pressable 
@@ -209,7 +297,12 @@ export default function RecipeDetail() {
     <View style={styles.container}>
       <Header 
         title={recipe.name}
-        rightElement={<MenuButton />}
+        rightElement={
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <ShareButton />
+            <MenuButton />
+          </View>
+        }
       />
       <ScrollView 
         style={{ flex: 1 }}
@@ -229,6 +322,9 @@ export default function RecipeDetail() {
             )}
 
             <View style={styles.content}>
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>{recipe.name}</Text>
+              </View>
               <View style={styles.detailsContainer}>
                 {recipe.cookingTime && (
                   <View style={styles.detailItem}>
@@ -240,25 +336,6 @@ export default function RecipeDetail() {
                   <View style={styles.detailItem}>
                     <Ionicons name="flame-outline" size={16} color={colors.text} style={styles.detailIcon} />
                     <Text style={styles.detailText}>{recipe.calories}</Text>
-                  </View>
-                )}
-                {recipe.sourceUrl && (
-                  <View style={styles.detailItem}>
-                    <Ionicons name="link-outline" size={16} color={colors.tint} style={styles.detailIcon} />
-                    <TouchableOpacity 
-                      onPress={async () => {
-                        await Clipboard.setString(recipe.sourceUrl!);
-                        if (Platform.OS === 'android') {
-                          ToastAndroid.show('Link copied to clipboard', ToastAndroid.SHORT);
-                        } else {
-                          Alert.alert('Copied', 'Link copied to clipboard');
-                        }
-                        Linking.openURL(recipe.sourceUrl!);
-                      }}
-                      activeOpacity={0.6}
-                    >
-                      <Text style={[styles.detailText, styles.linkText]}>source</Text>
-                    </TouchableOpacity>
                   </View>
                 )}
               </View>
@@ -278,11 +355,67 @@ export default function RecipeDetail() {
                 </ScrollView>
               )}
 
+              {/* Source link in a new section */}
+              {recipe.sourceUrl && (
+                <TouchableOpacity
+                  style={styles.sourceUrlRow}
+                  onPress={() => Linking.openURL(recipe.sourceUrl!)}
+                  onLongPress={() => {
+                    Clipboard.setString(recipe.sourceUrl!);
+                    if (Platform.OS === 'android') {
+                      ToastAndroid.show('Link copied', ToastAndroid.SHORT);
+                    }
+                  }}
+                  activeOpacity={0.6}
+                >
+                  <Ionicons name="open-outline" size={16} color={colors.tint} style={styles.detailIcon} />
+                  <Text style={[styles.detailText, styles.linkText]}>
+                    {recipe.sourceUrl} //Open source-recipe
+                  </Text>
+                </TouchableOpacity>
+              )}
+
               {renderGroups()}
             </View>
           </View>
         </ContentWrapper>
       </ScrollView>
+
+      <Modal
+        transparent
+        visible={isShareMenuVisible}
+        onRequestClose={() => setIsShareMenuVisible(false)}
+        animationType="fade"
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setIsShareMenuVisible(false)}
+        >
+          <View style={[styles.menuContainer, { right: 60, top: 80 }]}>
+            {recipe.sourceUrl ? (
+              <TouchableOpacity style={styles.menuItem} onPress={handleShareUrl}>
+                <Text style={styles.menuText}>Source URL</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.menuItem}>
+                <Text style={[styles.menuText, { opacity: 0.4 }]}>Source URL</Text>
+                <Text style={[styles.menuText, { opacity: 0.4, fontSize: 13 }]}>No source URL saved</Text>
+              </View>
+            )}
+            <TouchableOpacity style={styles.menuItem} onPress={handleShareRecipeText}>
+              <Text style={styles.menuText}>Recipe Text</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={handleShareIngredientsText}>
+              <Text style={styles.menuText}>Ingredients</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={handleShareExport}>
+              <Text style={styles.menuText}>Sift Recipe File</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       <Modal
         transparent
         visible={isMenuVisible}
@@ -385,6 +518,11 @@ const stylesFactory = (colors: any) => StyleSheet.create({
     fontWeight: '700',
     opacity: 0.9,
     color: colors.text,
+  },
+  sourceUrlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
   },
   ingredientRow: {
     flexDirection: 'row',
