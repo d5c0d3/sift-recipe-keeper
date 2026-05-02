@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Animated, Linking } from 'react-native';
-import Ionicons from 'react-native-vector-icons/Ionicons';
+import { ChevronDown } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@/hooks/useTheme';
 import Header from '@/components/Header';
@@ -16,6 +16,7 @@ export default function AiModel() {
   const [seed, setSeed] = useState('1997');
   const [temperature, setTemperature] = useState('0.1');
   const [supportsResponseFormat, setSupportsResponseFormat] = useState(true);
+  const [supportsVision, setSupportsVision] = useState(false);
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
   const chevronRotation = useRef(new Animated.Value(0)).current;
   const [isTesting, setIsTesting] = useState(false);
@@ -44,12 +45,14 @@ export default function AiModel() {
       const savedSeed = await AsyncStorage.getItem('ai_model_seed');
       const savedTemperature = await AsyncStorage.getItem('ai_model_temperature');
       const savedSupportsResponseFormat = await AsyncStorage.getItem('ai_model_supports_response_format');
+      const savedSupportsVision = await AsyncStorage.getItem('ai_model_supports_vision');
       if (savedEndpoint) setEndpoint(savedEndpoint);
       if (savedModel) setModel(savedModel);
       if (savedApiKey) setApiKey(savedApiKey);
       if (savedSeed) setSeed(savedSeed);
       if (savedTemperature) setTemperature(savedTemperature);
       if (savedSupportsResponseFormat !== null) setSupportsResponseFormat(savedSupportsResponseFormat === 'true');
+      if (savedSupportsVision !== null) setSupportsVision(savedSupportsVision === 'true');
     } catch (error) {
       console.error('Failed to load AI model settings', error);
     }
@@ -90,6 +93,7 @@ export default function AiModel() {
         await AsyncStorage.setItem('ai_model_seed', seed);
         await AsyncStorage.setItem('ai_model_temperature', temperature);
         await AsyncStorage.setItem('ai_model_supports_response_format', String(supportsResponseFormat));
+        await AsyncStorage.setItem('ai_model_supports_vision', String(supportsVision));
         setPopupConfig({
           title: 'Success',
           message: 'Settings saved and connection is working.',
@@ -137,6 +141,11 @@ export default function AiModel() {
             autoCapitalize="none"
             style={styles.input}
           />
+          {endpoint.startsWith('http://') && (
+            <Text style={styles.httpWarning}>
+              Insecure endpoint (HTTP). Your API key will be transmitted unencrypted.
+            </Text>
+          )}
 
           <Text style={styles.label}>Model name</Text>
           <Input
@@ -176,7 +185,7 @@ export default function AiModel() {
               rotate: chevronRotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] }),
             }],
           }}>
-            <Ionicons name="chevron-down" size={18} color={colors.text} style={{ opacity: 0.5 }} />
+            <ChevronDown size={18} color={colors.text} style={{ opacity: 0.5 }} />
           </Animated.View>
         </TouchableOpacity>
 
@@ -207,6 +216,16 @@ export default function AiModel() {
               <Switch
                 value={supportsResponseFormat}
                 onValueChange={setSupportsResponseFormat}
+                trackColor={{ false: colors.deleteButton, true: colors.tint }}
+                thumbColor={colors.inputBackground}
+              />
+            </View>
+
+            <View style={styles.switchRow}>
+              <Text style={styles.label}>Supports vision (image import)</Text>
+              <Switch
+                value={supportsVision}
+                onValueChange={setSupportsVision}
                 trackColor={{ false: colors.deleteButton, true: colors.tint }}
                 thumbColor={colors.inputBackground}
               />
@@ -295,5 +314,12 @@ const stylesFactory = (colors: any) => StyleSheet.create({
     fontSize: 16,
     marginRight: 16,
     color: colors.text,
+  },
+  httpWarning: {
+    fontSize: 13,
+    color: colors.text,
+    marginTop: -10,
+    marginBottom: 16,
+    opacity: 0.7,
   },
 });

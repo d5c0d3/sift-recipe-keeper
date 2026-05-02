@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image } from 'react-native';
 import { useTheme } from '../hooks/useTheme';
-import Ionicons from 'react-native-vector-icons/Ionicons';
+import { Plus, XCircle } from 'lucide-react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import GroupsEditor, { GroupDraft } from './GroupsEditor';
 import CustomPopup from './CustomPopup';
@@ -20,9 +20,17 @@ export interface RecipeFormProps {
   initialRecipe?: Recipe;
   onSave: (recipe: Recipe) => void;
   onCancel?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-export default function RecipeForm({ mode, initialRecipe, onSave, onCancel }: RecipeFormProps) {
+export interface RecipeFormHandle {
+  submit: () => void;
+}
+
+const RecipeForm = forwardRef<RecipeFormHandle, RecipeFormProps>(function RecipeForm(
+  { mode, initialRecipe, onSave, onCancel, onDirtyChange },
+  ref,
+) {
   const { colors } = useTheme();
 
   const [name, setName] = useState(initialRecipe?.name ?? '');
@@ -210,6 +218,16 @@ export default function RecipeForm({ mode, initialRecipe, onSave, onCancel }: Re
     return output;
   };
 
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    if (mountedRef.current) {
+      onDirtyChange?.(true);
+    } else {
+      mountedRef.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, imageUri, ingredientGroups, instructionGroups, cookingTime, calories, servings, sourceUrl, tags]);
+
   const handleSave = () => {
     if (!name.trim()) {
       setPopupConfig({
@@ -247,6 +265,10 @@ export default function RecipeForm({ mode, initialRecipe, onSave, onCancel }: Re
 
     onSave(recipe);
   };
+
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+  useImperativeHandle(ref, () => ({ submit: () => handleSaveRef.current() }), []);
 
   const handleAddImage = async () => {
     const result = await launchImageLibrary({ mediaType: 'photo', quality: 0.8 });
@@ -372,7 +394,7 @@ export default function RecipeForm({ mode, initialRecipe, onSave, onCancel }: Re
             style={{ height: 48, flex: 1 }}
           />
           <TouchableOpacity style={styles.addButton} onPress={handleAddTag}>
-            <Ionicons name="add" size={24} color={colors.background} />
+            <Plus size={24} color={colors.background} />
           </TouchableOpacity>
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tagsScrollContainer} contentContainerStyle={styles.tagsContainer}>
@@ -380,7 +402,7 @@ export default function RecipeForm({ mode, initialRecipe, onSave, onCancel }: Re
             <View key={tag} style={styles.tagContainer}> 
               <Text style={styles.tagText}>{tag}</Text>
               <TouchableOpacity style={styles.tagDeleteButton} onPress={() => handleDeleteTag(tag)}>
-                <Ionicons name="close-circle" size={24} color={colors.deleteButton} style={styles.tagDeleteIcon} />
+                <XCircle size={24} color={colors.deleteButton} style={styles.tagDeleteIcon} />
               </TouchableOpacity>
             </View>
           ))}
@@ -434,5 +456,6 @@ export default function RecipeForm({ mode, initialRecipe, onSave, onCancel }: Re
       />
     </View>
   );
-}
- 
+});
+
+export default RecipeForm;

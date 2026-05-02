@@ -11,18 +11,26 @@ import {
   Modal,
   Pressable,
   Linking,
-  Clipboard,
   ToastAndroid,
   useWindowDimensions,
+  Share,
+  Animated,
 } from 'react-native';
+// see above 
+import Clipboard from '@react-native-clipboard/clipboard';
+
 import { useNavigation, useRoute } from '@react-navigation/native';
-import Ionicons from 'react-native-vector-icons/Ionicons';
+import { Share2, MoreVertical, Clock, Flame, Users, Link2 } from 'lucide-react-native';
 import RecipeStore from '../store/RecipeStore';
 import { Recipe } from '../models/Recipe';
 import { useTheme } from '../hooks/useTheme';
+import { useMenuAnimation } from '../hooks/useMenuAnimation';
 import Header from '../components/Header';
 import CustomPopup from '../components/CustomPopup';
 import ContentWrapper from '../components/ContentWrapper';
+import RNFS from 'react-native-fs';
+import RNShare from 'react-native-share';
+import { buildRecipeZip } from '../services/RecipeExportUtils';
 
 export default function RecipeDetail() {
   const navigation = useNavigation<any>();
@@ -37,7 +45,50 @@ export default function RecipeDetail() {
     }
     return foundRecipe;
   });
-  const [isMenuVisible, setIsMenuVisible] = useState(false);
+  const editMenu = useMenuAnimation();
+  const shareMenu = useMenuAnimation();
+
+  const handleShareRecipeText = async () => {
+    shareMenu.close();
+    try {
+      await Share.share({ message: formatRecipeForSharing(recipe!) });
+    } catch (err: any) {
+      if (err?.message && !err.message.includes('cancel') && !err.message.includes('dismiss') && !err.message.includes('did not share')) {
+        console.error('Failed to share recipe text:', err);
+      }
+    }
+  };
+
+  const handleShareIngredientsText = async () => {
+    shareMenu.close();
+    try {
+      await Share.share({ message: formatIngredientsForSharing(recipe!) });
+    } catch (err: any) {
+      if (err?.message && !err.message.includes('cancel') && !err.message.includes('dismiss') && !err.message.includes('did not share')) {
+        console.error('Failed to share ingredients text:', err);
+      }
+    }
+  };
+
+  const handleShareExport = async () => {
+    shareMenu.close();
+    let zipPath: string | null = null;
+    try {
+      zipPath = await buildRecipeZip([recipe!]);
+      await RNShare.open({
+        url: `file://${zipPath}`,
+        type: 'application/x-sift-recipe',
+      });
+    } catch (err: any) {
+      // RNShare throws on user cancellation — don't log that as an error
+      if (err?.message && !err.message.includes('cancel') && !err.message.includes('dismiss') && !err.message.includes('did not share')) {
+        console.error('Failed to share recipe file:', err);
+      }
+    } finally {
+      if (zipPath) RNFS.unlink(zipPath).catch(() => {});
+    }
+  };
+
 
   const { colors } = useTheme();
   const { width: windowWidth } = useWindowDimensions();
@@ -73,7 +124,7 @@ export default function RecipeDetail() {
   }, [recipe.id]);
 
   const handleDelete = () => {
-    setIsMenuVisible(false);
+    editMenu.close();
     setPopupConfig({
       title: 'Delete Recipe',
       message: 'Are you sure you want to delete this recipe?',
@@ -98,13 +149,11 @@ export default function RecipeDetail() {
   };
 
   const handleEdit = () => {
-    setIsMenuVisible(false);
-    navigation.navigate('EditRecipe', { id: recipe.id });
+    editMenu.close(() => navigation.navigate('EditRecipe', { id: recipe.id }));
   };
 
   const handleEditWithAI = () => {
-    setIsMenuVisible(false);
-    navigation.navigate('EditWithAI', { id: recipe.id });
+    editMenu.close(() => navigation.navigate('EditWithAI', { id: recipe.id }));
   };
 
   const handleIngredientCheck = (ingredientId: string) => {
@@ -119,16 +168,69 @@ export default function RecipeDetail() {
     });
   };
 
+  const formatIngredientsForSharing = (recipe: Recipe): string => {
+    const lines: string[] = [recipe.name + ' - Ingredients', ''];
+
+    (recipe.ingredientsGroups || []).forEach(group => {
+      if (group.title) lines.push(group.title.toUpperCase());
+      group.items.forEach(ing => lines.push(`• ${ing.name}`));
+      lines.push('');
+    });
+    return lines.join('\n').trim();
+  };
+
+  const formatRecipeForSharing = (recipe: Recipe): string => {
+    const lines: string[] = [recipe.name, ''];
+
+    // Add recipe details
+    const details: string[] = [];
+    if (recipe.cookingTime) details.push(`Cooking time: ${recipe.cookingTime}`);
+    if (recipe.servings) details.push(`Servings: ${recipe.servings}`);
+    if (recipe.calories) details.push(`Calories: ${recipe.calories}`);
+    if (details.length > 0) {
+      lines.push(details.join(' | '));
+      lines.push('');
+    }
+
+    (recipe.ingredientsGroups || []).forEach(group => {
+      if (group.title) lines.push(group.title.toUpperCase());
+      group.items.forEach(ing => lines.push(`• ${ing.name}`));
+      lines.push('');
+    });
+
+    (recipe.instructionGroups || []).forEach(group => {
+      if (group.title) lines.push(group.title.toUpperCase());
+      group.items.forEach((step, i) => {
+        lines.push(`${i + 1}. ${step}`);
+        lines.push('');
+      });
+    });
+
+    if (recipe.sourceUrl) lines.push(`Source: ${recipe.sourceUrl}`);
+    return lines.join('\n').trim();
+  };
+
+  const ShareButton = () => (
+    <Pressable
+      onPress={shareMenu.open}
+      style={({ pressed }) => ({ padding: 8, right: -5, opacity: pressed ? 0.7 : 1 })}
+      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+    >
+      <Share2 size={23} color={colors.tint} />
+    </Pressable>
+  );
+
   const MenuButton = () => (
-    <Pressable 
-      onPress={() => setIsMenuVisible(true)}
-      style={({ pressed }) => ({ 
+    <Pressable
+      onPress={editMenu.open}
+      style={({ pressed }) => ({
         padding: 8,
         opacity: pressed ? 0.7 : 1,
+        right: -10
       })}
       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
     >
-      <Ionicons name="ellipsis-vertical" size={24} color={colors.tint} />
+      <MoreVertical size={23} color={colors.tint} />
     </Pressable>
   );
 
@@ -161,15 +263,11 @@ export default function RecipeDetail() {
                 const isChecked = checkedIngredients.has(ingredient.id);
                 return (
                   <View key={ingredient.id} style={styles.ingredientRow}>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       onPress={() => handleIngredientCheck(ingredient.id)}
                       style={styles.checkboxContainer}
                     >
-                      <Ionicons 
-                        name={isChecked ? 'checkbox' : 'square-outline'} 
-                        size={25} 
-                        color={isChecked ? colors.tint : colors.text} 
-                      />
+                      <View style={[styles.circle, isChecked && { backgroundColor: colors.tint, borderColor: colors.tint }]} />
                     </TouchableOpacity>
                     <Text style={[styles.ingredient, isChecked && styles.checkedIngredient]}>
                       {ingredient.name}
@@ -212,9 +310,14 @@ export default function RecipeDetail() {
 
   return (
     <View style={styles.container}>
-      <Header 
-        title={recipe.name}
-        rightElement={<MenuButton />}
+      <Header
+        title={''} 
+        rightElement={
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <ShareButton />
+            <MenuButton />
+          </View>
+        }
       />
       <ScrollView 
         style={{ flex: 1 }}
@@ -233,29 +336,30 @@ export default function RecipeDetail() {
               </View>
             )}
 
+            <Text style={styles.recipeTitle} numberOfLines={3}>{recipe.name}</Text>
             <View style={styles.content}>
               <View style={styles.detailsContainer}>
                 {recipe.cookingTime && (
                   <View style={styles.detailItem}>
-                    <Ionicons name="time-outline" size={16} color={colors.text} style={styles.detailIcon} />
+                    <Clock size={16} color={colors.text} style={styles.detailIcon} />
                     <Text style={styles.detailText}>{recipe.cookingTime}</Text>
                   </View>
                 )}
                 {recipe.calories && (
                   <View style={styles.detailItem}>
-                    <Ionicons name="flame-outline" size={16} color={colors.text} style={styles.detailIcon} />
+                    <Flame size={16} color={colors.text} style={styles.detailIcon} />
                     <Text style={styles.detailText}>{recipe.calories}</Text>
                   </View>
                 )}
                 {recipe.servings && (
                   <View style={styles.detailItem}>
-                    <Ionicons name="people-outline" size={16} color={colors.text} style={styles.detailIcon} />
+                    <Users size={16} color={colors.text} style={styles.detailIcon} />
                     <Text style={styles.detailText}>{recipe.servings}</Text>
                   </View>
                 )}
                 {recipe.sourceUrl && (
                   <View style={styles.detailItem}>
-                    <Ionicons name="link-outline" size={16} color={colors.tint} style={styles.detailIcon} />
+                    <Link2 size={16} color={colors.tint} style={styles.detailIcon} />
                     <TouchableOpacity 
                       onPress={async () => {
                         await Clipboard.setString(recipe.sourceUrl!);
@@ -294,26 +398,28 @@ export default function RecipeDetail() {
           </View>
         </ContentWrapper>
       </ScrollView>
-      <Modal
-        transparent
-        visible={isMenuVisible}
-        onRequestClose={() => setIsMenuVisible(false)}
-        animationType="fade"
-      >
-        <TouchableOpacity 
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setIsMenuVisible(false)}
-        >
-          <View style={[styles.menuContainer, { 
-            bottom: Platform.select({
-              ios: 'auto',
-              android: 'auto',
-              default: 'auto'
-            }),
-            right: 20,
-            top: 80,
-          }]}> 
+
+      <Modal transparent visible={shareMenu.isVisible} onRequestClose={() => shareMenu.close()}>
+        <Animated.View style={[styles.modalOverlay, { opacity: shareMenu.opacity }]}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => shareMenu.close()} />
+          <Animated.View style={[styles.menuContainer, { right: 20, top: 80, opacity: shareMenu.opacity, transform: [{ scale: shareMenu.scale }] }]}>
+            <TouchableOpacity style={styles.menuItem} onPress={handleShareIngredientsText}>
+              <Text style={styles.menuText}>Ingredients</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={handleShareRecipeText}>
+              <Text style={styles.menuText}>Recipe as text</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={handleShareExport}>
+              <Text style={styles.menuText}>Recipe as .sift file</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </Animated.View>
+      </Modal>
+
+      <Modal transparent visible={editMenu.isVisible} onRequestClose={() => editMenu.close()}>
+        <Animated.View style={[styles.modalOverlay, { opacity: editMenu.opacity }]}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => editMenu.close()} />
+          <Animated.View style={[styles.menuContainer, { right: 20, top: 80, opacity: editMenu.opacity, transform: [{ scale: editMenu.scale }] }]}>
             <TouchableOpacity style={styles.menuItem} onPress={handleEdit}>
               <Text style={styles.menuText}>Edit manually</Text>
             </TouchableOpacity>
@@ -323,8 +429,8 @@ export default function RecipeDetail() {
             <TouchableOpacity style={styles.menuItem} onPress={handleDelete}>
               <Text style={[styles.menuText, styles.deleteMenuText]}>Delete</Text>
             </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
+          </Animated.View>
+        </Animated.View>
       </Modal>
 
       <CustomPopup
@@ -365,6 +471,15 @@ const stylesFactory = (colors: any) => StyleSheet.create({
   sectionHeaderRow: {
     marginTop: 24,
   },
+  recipeTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    opacity: 0.7,
+    color: colors.text,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 4,
+  },
   sectionTitle: {
     fontSize: 22,
     fontWeight: 'bold',
@@ -403,10 +518,21 @@ const stylesFactory = (colors: any) => StyleSheet.create({
   ingredientRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 20,
   },
   checkboxContainer: {
-    marginRight: 12,
+    marginRight: 8,
+    padding: 12,
+    margin: -12,
+  },
+  circle: {
+    width: 19,
+    height: 19,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: colors.text,
+    opacity: 0.5,
+    backgroundColor: 'transparent',
   },
   ingredient: {
     fontSize: 16,
@@ -428,6 +554,7 @@ const stylesFactory = (colors: any) => StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     marginRight: 12,
+    marginTop: 1,
     minWidth: 24,
     color: colors.tint,
   },
@@ -480,7 +607,7 @@ const stylesFactory = (colors: any) => StyleSheet.create({
   },
   detailIcon: {
     marginRight: 4,
-    opacity: 0.6,
+    opacity: 0.8,
   },
   detailText: {
     fontSize: 14,

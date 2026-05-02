@@ -1,19 +1,23 @@
-import { View, TouchableOpacity, StyleSheet, Text, Modal, TextInput, useWindowDimensions, Pressable } from 'react-native';
-import { useEffect, useMemo, useState } from 'react';
+import { View, TouchableOpacity, StyleSheet, Text, Modal, TextInput, useWindowDimensions, Pressable, Animated } from 'react-native';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import RecipeGrid from '../components/RecipeGrid';
 import RecipeStore from '../store/RecipeStore';
-import Ionicons from 'react-native-vector-icons/Ionicons';
+import { Menu, Search, Plus, ArrowRight } from 'lucide-react-native';
 import { Recipe } from '../models/Recipe';
 import { useTheme } from '../hooks/useTheme';
 import Header from '../components/Header';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import IntroFlow from '../components/IntroFlow';
+import { useMenuAnimation } from '../hooks/useMenuAnimation';
 
 export default function RecipeList({ navigation }: { navigation: any }) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [isMenuVisible, setIsMenuVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAiPopup, setShowAiPopup] = useState(false);
+  const [visionEnabled, setVisionEnabled] = useState(false);
+  const fabRotation = useRef(new Animated.Value(0)).current;
+  const menu = useMenuAnimation();
 
   const { width } = useWindowDimensions();
   const numColumns = width > 600 ? 3 : width > 300 ? 2 : 1;
@@ -31,6 +35,20 @@ export default function RecipeList({ navigation }: { navigation: any }) {
     RecipeStore.addListener(setRecipes);
     return () => RecipeStore.removeListener(setRecipes);
   }, []);
+
+  useFocusEffect(useCallback(() => {
+    AsyncStorage.getItem('ai_model_supports_vision').then(val => {
+      setVisionEnabled(val === 'true');
+    });
+  }, []));
+
+  useEffect(() => {
+    const unsub = navigation.addListener('blur', () => {
+      menu.close();
+      fabRotation.setValue(0);
+    });
+    return unsub;
+  }, [navigation]);
 
   useEffect(() => {
     const checkAiSettings = async () => {
@@ -51,18 +69,44 @@ export default function RecipeList({ navigation }: { navigation: any }) {
     checkAiSettings();
   }, [recipes]);
 
-  const handleAddWithUrl = () => {
-    setIsMenuVisible(false);
-    navigation.navigate('AddRecipeUrl');
+  const openMenu = () => {
+    menu.open();
+    Animated.spring(fabRotation, {
+      toValue: 1,
+      useNativeDriver: true,
+      tension: 120,
+      friction: 8,
+    }).start();
   };
 
-  const handleAddManually = () => {
-    setIsMenuVisible(false);
-    navigation.navigate('AddRecipe');
+  const closeMenu = () => {
+    menu.close();
+    Animated.spring(fabRotation, {
+      toValue: 0,
+      useNativeDriver: true,
+      tension: 120,
+      friction: 8,
+    }).start();
+  };
+
+  const handleAddFromUrl = () => {
+    menu.close(() => navigation.navigate('AddRecipeUrl'));
+  };
+
+  const handleAddFromFile = () => {
+    menu.close(() => navigation.navigate('AddRecipeText'));
+  };
+
+  const handleAddFromScratch = () => {
+    menu.close(() => navigation.navigate('AddRecipe'));
   };
 
   const handleOpenSettings = () => {
     navigation.navigate('Settings');
+  };
+
+  const handleAddFromPicture = () => {
+    menu.close(() => navigation.navigate('AddRecipePicture'));
   };
 
   const filteredRecipes = recipes
@@ -99,13 +143,13 @@ export default function RecipeList({ navigation }: { navigation: any }) {
             style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="menu" style={styles.menuIcon} size={32} color={colors.tint} />
+            <Menu size={28} color={colors.tint} style={styles.menuIcon} />
           </Pressable>
         }
       />
       <View style={styles.container}>
         <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color={colors.deleteButton} style={styles.searchIcon} />
+          <Search size={20} color={colors.deleteButton} style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
             placeholder="Search recipes..."
@@ -124,11 +168,14 @@ export default function RecipeList({ navigation }: { navigation: any }) {
           padding={padding}
         />
         
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.fab}
-          onPress={() => setIsMenuVisible(true)}
+          onPress={openMenu}
+          activeOpacity={1}
         >
-          <Ionicons name="add" size={24} color={colors.background} />
+          <Animated.View style={{ transform: [{ rotate: fabRotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] }) }] }}>
+            <Plus size={24} color={colors.background} />
+          </Animated.View>
         </TouchableOpacity>
 
         {recipes.length === 0 && (
@@ -137,39 +184,44 @@ export default function RecipeList({ navigation }: { navigation: any }) {
               <Text style={styles.tooltipText}>
                 Add your first recipe
               </Text>
-              <Ionicons 
-                name="arrow-forward" 
-                size={14} 
-                color={colors.text} 
-                style={styles.arrowIcon}
-              />
+              <ArrowRight size={14} color={colors.text} style={styles.arrowIcon} />
             </View>
           </View>
         )}
 
         <Modal
           transparent
-          visible={isMenuVisible}
-          onRequestClose={() => setIsMenuVisible(false)}
-          animationType="fade"
+          visible={menu.isVisible}
+          onRequestClose={closeMenu}
         >
-          <TouchableOpacity 
-            style={styles.modalOverlay}
-            activeOpacity={1}
-            onPress={() => setIsMenuVisible(false)}
-          >
-            <View style={[styles.menuContainer, { 
+          <Animated.View style={[styles.modalOverlay, { opacity: menu.opacity }]}>
+            <TouchableOpacity
+              style={StyleSheet.absoluteFill}
+              activeOpacity={1}
+              onPress={closeMenu}
+            />
+            <Animated.View style={[styles.menuContainer, {
               bottom: 90,
-              right: 20 
+              right: 20,
+              opacity: menu.opacity,
+              transform: [{ scale: menu.scale }],
             }]}>
-              <TouchableOpacity style={styles.menuItem} onPress={handleAddWithUrl}>
-                <Text style={styles.menuText}>Add recipe from website</Text>
+              <TouchableOpacity style={styles.menuItem} onPress={handleAddFromUrl}>
+                <Text style={styles.menuText}>Add from website</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.menuItem} onPress={handleAddManually}>
-                <Text style={styles.menuText}>Add recipe manually</Text>
+              <TouchableOpacity style={styles.menuItem} onPress={handleAddFromFile}>
+                <Text style={styles.menuText}>Add from text</Text>
               </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
+              {visionEnabled && (
+                <TouchableOpacity style={styles.menuItem} onPress={handleAddFromPicture}>
+                  <Text style={styles.menuText}>Add from picture</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={styles.menuItem} onPress={handleAddFromScratch}>
+                <Text style={styles.menuText}>Add from scratch</Text>
+              </TouchableOpacity>
+            </Animated.View>
+          </Animated.View>
         </Modal>
         <IntroFlow
           visible={showAiPopup}

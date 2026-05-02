@@ -1,5 +1,14 @@
+#!/usr/bin/env node
+
+// Updates the supported-models tables in README.md by fetching live pricing
+// and response-format support from the OpenRouter API.
+//
+// Usage:
+//   node model-tools/scripts/supportedModels.js
+
 const fs = require('fs');
 const path = require('path');
+require('../lib/config'); // loads .env
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -9,60 +18,8 @@ const path = require('path');
 const ESTIMATED_INPUT_TOKENS = 3000;
 const ESTIMATED_OUTPUT_TOKENS = 1000;
 
-const README_PATH = path.join(__dirname, 'README.md');
-
-// Table structure for the README. Each section maps to a provider heading.
-// models use OpenRouter IDs; displayName strips the provider prefix for
-// sections where the native API doesn't use it (e.g. OpenAI).
-const SECTIONS = [
-  {
-    heading: '### OpenRouter',
-    stripProviderPrefix: false,
-    groups: [
-      {
-        label: 'Good quality, best balance between accuracy and price',
-        models: [
-          'google/gemma-3-27b-it',
-          'mistralai/mistral-small-3.2-24b-instruct',
-          'qwen/qwen3-coder-30b-a3b-instruct',
-        ],
-      },
-      {
-        label: 'Great quality, but more expensive',
-        models: [
-          'google/gemma-4-31b-it',
-          'google/gemini-2.5-flash',
-        ],
-      },
-      {
-        label: 'Medium quality, cheap, but prone to mistakes',
-        models: [
-          'google/gemma-3-12b-it',
-          'meta-llama/llama-3.1-8b-instruct',
-        ],
-      },
-    ],
-  },
-  {
-    heading: '### OpenAI',
-    stripProviderPrefix: true,
-    groups: [
-      {
-        label: 'Good quality, best balance between accuracy and price',
-        models: [
-          'openai/gpt-4o-mini',
-          'openai/gpt-5.4-nano',
-        ],
-      },
-      {
-        label: 'Great quality, but more expensive',
-        models: [
-          'openai/gpt-5.4-mini',
-        ],
-      },
-    ],
-  },
-];
+const README_PATH = path.join(__dirname, '..', '..', 'README.md');
+const SECTIONS = require('../supportedModels.json');
 
 // ─── Fetch ────────────────────────────────────────────────────────────────────
 
@@ -79,9 +36,16 @@ async function fetchModelData() {
     const inputPricePerToken = parseFloat(model.pricing?.prompt ?? 0);
     const outputPricePerToken = parseFloat(model.pricing?.completion ?? 0);
 
+    const modality = model.architecture?.modality ?? '';
+    const inputModalities = model.architecture?.input_modalities ?? [];
+    const supportsImages =
+      inputModalities.includes('image') ||
+      modality.includes('image');
+
     result[model.id] = {
       price: inputPricePerToken * ESTIMATED_INPUT_TOKENS + outputPricePerToken * ESTIMATED_OUTPUT_TOKENS,
       supportsResponseFormat: model.supported_parameters?.includes('response_format') ?? null,
+      supportsImages,
     };
   }
 
@@ -92,12 +56,12 @@ async function fetchModelData() {
 
 function generateTable(section, modelData) {
   const lines = [
-    '| Model name | Response format | Est. price |',
-    '|---|---|---|',
+    '| Model name | Response format | Images | Est. price |',
+    '|---|---|---|---|',
   ];
 
   for (const group of section.groups) {
-    lines.push(`| **${group.label}** | | |`);
+    lines.push(`| **${group.label}** | | | |`);
 
     for (const modelId of group.models) {
       const data = modelData[modelId];
@@ -111,8 +75,9 @@ function generateTable(section, modelData) {
         : data?.supportsResponseFormat
           ? 'On'
           : 'Off';
+      const images = data ? (data.supportsImages ? 'Yes' : 'No') : 'N/A';
 
-      lines.push(`| \`${displayId}\` | ${responseFormat} | ${priceStr} |`);
+      lines.push(`| \`${displayId}\` | ${responseFormat} | ${images} | ${priceStr} |`);
     }
   }
 
@@ -131,7 +96,6 @@ function updateReadme(modelData) {
       continue;
     }
 
-    // Find the start and end of the table after this heading
     let tableStart = -1;
     let tableEnd = -1;
     for (let i = headingIdx + 1; i < lines.length; i++) {
@@ -160,21 +124,17 @@ function updateReadme(modelData) {
 async function main() {
   const modelData = await fetchModelData();
 
-  // Print results to console
   const col1 = 50;
   const col2 = 10;
-  const col3 = 18;
+  const col3 = 8;
+  const col4 = 18;
 
   console.log('Estimated recipe import cost');
   console.log(`Input tokens:  ${ESTIMATED_INPUT_TOKENS}`);
   console.log(`Output tokens: ${ESTIMATED_OUTPUT_TOKENS}`);
   console.log();
-  console.log(
-    'Model'.padEnd(col1) +
-    'Res. fmt'.padEnd(col2) +
-    'Est. per recipe'
-  );
-  console.log('-'.repeat(col1 + col2 + col3));
+  console.log('Model'.padEnd(col1) + 'Res. fmt'.padEnd(col2) + 'Images'.padEnd(col3) + 'Est. per recipe');
+  console.log('-'.repeat(col1 + col2 + col3 + col4));
 
   for (const section of SECTIONS) {
     console.log(`\n${section.heading}`);
@@ -189,9 +149,11 @@ async function main() {
         const responseFormat = data.supportsResponseFormat === null
           ? '?'
           : data.supportsResponseFormat ? 'On' : 'Off';
+        const images = data.supportsImages ? 'Yes' : 'No';
         console.log(
           `  ${modelId}`.padEnd(col1) +
           responseFormat.padEnd(col2) +
+          images.padEnd(col3) +
           `$${data.price.toFixed(6)}`
         );
       }

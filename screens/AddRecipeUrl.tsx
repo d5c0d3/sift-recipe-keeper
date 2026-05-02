@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { RootStackParamList } from '../navigation/types';
 import NetInfo from '@react-native-community/netinfo';
 import RecipeExtractorService from '../services/RecipeExtractorService';
 import RecipeStore from '../store/RecipeStore';
@@ -19,7 +20,8 @@ const checkInternetConnection = async () => {
 
 export default function AddRecipeUrl() {
   const navigation = useNavigation();
-  const [url, setUrl] = useState('');
+  const route = useRoute<RouteProp<RootStackParamList, 'AddRecipeUrl'>>();
+  const [url, setUrl] = useState(route.params?.initialUrl ?? '');
   const [loading, setLoading] = useState(false);
   const { colors } = useTheme();
   const [showPopup, setShowPopup] = useState(false);
@@ -81,7 +83,7 @@ export default function AddRecipeUrl() {
 
     setLoading(true);
     try {
-      const recipe = await RecipeExtractorService.extractRecipe(url);
+      const recipe = await RecipeExtractorService.extractRecipeFromUrl(url);
       recipe.sourceUrl = url.trim();
       await RecipeStore.addRecipe(recipe);
       navigation.goBack();
