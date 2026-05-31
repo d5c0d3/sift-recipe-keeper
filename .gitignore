@@ -57,3 +57,6 @@ ios/
 android/app/gradle.properties
 
 PLAN.md
+
+# local planning documents
+.local_plans/
